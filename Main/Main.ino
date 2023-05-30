@@ -12,11 +12,11 @@
 #include <Adafruit_SSD1306.h>
 
 /* HTTP REQUEST CONFIGURATION */
-const char *ssid = "Soul Blade";
+const char *ssid = "keyper";
 const char *password = "12345678";
 
 String serverIPAddress = "192.168.147.250";
-String serverPort = "8081";
+String serverPort = "8080";
 String apiPath = "http://" + serverIPAddress + ":" + serverPort + "/api";
 
 String studentPath = apiPath + "/student";
@@ -25,8 +25,9 @@ String buildingPath = apiPath + "/building";
 String keyPath = apiPath + "/key";
 String roomPath = apiPath + "/room";
 String recordPath = apiPath + "/record";
+String attendancePath = apiPath + "/attendance";
 
-String ROOMNAME = "EN-CE-303";
+String ROOMNAME = "EN-CE-301";
 
 HTTPClient http;
 int responseCode;
@@ -459,103 +460,32 @@ void loop()
         Serial.print("RFID hex: ");
         Serial.println(rfid);
 
-        String responseBody = getStudent(rfid);
+        String responseBody = logData(rfid);
 
         if (responseCode == 200)
         {
-            String last_name = valueFromJSON(responseBody, "last_name");
-            String studentSchoolId = valueFromJSON(responseBody, "school_id");
+            String full_name = valueFromJSON(responseBody, "StudentName");
+            String subject_name = valueFromJSON(responseBody, "Subject");
 
-            displayProfile(last_name, studentSchoolId);
+            displayProfile(full_name, subject_name);
+            delay(3000);
 
-            previousReadingKeyTime = millis();
-            Serial.println("waiting for rfid tag");
-
-            while (millis() - previousReadingKeyTime <= readingKeyDuration)
-            {
-                rfid = readRFID();
-                if (rfid == "")
-                    continue;
-
-                displayBitmap("requesting");
-
-                Serial.print("RFID hex: ");
-                Serial.println(rfid);
-
-                String keyResponseBody = getKey(rfid);
-                Serial.println(keyResponseBody);
-
-                if (responseCode != 200)
-                {
-                    displayBitmap("invalid");
-                    delay(2000);
-                    skipKeyHandling = true;
-                    break;
-                }
-
-                Serial.println("Key found.");
-
-                if (valueFromJSON(keyResponseBody, "status") == "available")
-                {
-                    Serial.println("Borrowing key");
-                    borrowKey(rfid, studentSchoolId);
-                    displayBitmap("borrowed");
-                    delay(2000);
-                    Serial.println("Key borrowed");
-                    skipKeyHandling = true;
-                    break;
-                }
-
-                if (valueFromJSON(keyResponseBody, "status") == "borrowed")
-                {
-                    Serial.println("Returning key");
-                    returnKey(rfid, studentSchoolId);
-                    displayBitmap("returned");
-                    delay(2000);
-                    Serial.println("Key returned");
-                    skipKeyHandling = true;
-                    break;
-                }
-            }
-            skipKeyHandling = true;
+            displayBitmap("logged");
+            delay(1000);
+            continue;
         }
 
-        if (skipKeyHandling)
+        if (responseCode == 300)
+        {
+            displayBitmap("attended");
+            delay(3000);
             continue;
+        }
 
-        Serial.println("Student RFID can't be found.");
+        Serial.println("Student RFID can't be found or invalid time or room");
         displayBitmap("invalid");
+        delay(3000);
     }
-}
-
-String sendHTTPGETRequest(String requestPath)
-{
-    String responseBody = "";
-
-    if (WiFi.status() != WL_CONNECTED)
-    {
-        Serial.println("Cannot send get request, WiFi Disconnected.");
-        return "";
-    }
-
-    http.begin(requestPath.c_str());
-
-    responseCode = http.GET();
-
-    if (responseCode <= 0)
-    {
-        Serial.print("HTTP Error code: ");
-        Serial.println(responseCode);
-        return "";
-    }
-
-    Serial.print("HTTP Response code: ");
-    Serial.println(responseCode);
-    responseBody = http.getString();
-
-    http.end();
-
-    return responseBody;
 }
 
 String sendHTTPPOSTRequest(String requestPath, String postData)
@@ -587,6 +517,13 @@ String sendHTTPPOSTRequest(String requestPath, String postData)
     http.end();
 
     return responseBody;
+}
+
+String logData(String studentRFID)
+{
+    String postData = "{\"room\": \"" + ROOMNAME + "\",\"rfid\": \"" + studentRFID + "\"}";
+
+    return sendHTTPPOSTRequest(attendancePath, postData);
 }
 
 String readRFID()
@@ -633,12 +570,6 @@ String byteArrToHexString(byte *buffer, byte bufferSize)
     }
 
     return hexString;
-}
-
-String getStudent(String rfid)
-{
-    String requestPath = studentPath + "/" + rfid;
-    return sendHTTPGETRequest(requestPath);
 }
 
 void deserializeResponseBody(StaticJsonDocument<200> *doc, String responseBody)
@@ -696,7 +627,7 @@ void displayProfile(String lastname, String schoolid)
 
     display.setTextColor(WHITE);
 
-    int maxLenght = 7;
+    int maxLength = 7;
 
     if (lastname.length() > maxLength)
     {
@@ -711,9 +642,18 @@ void displayProfile(String lastname, String schoolid)
         display.print(limitString(lastname, maxLength));
     }
 
-    display.setTextSize(2);
-    display.setCursor(36, 34);
-    display.print(limitString(schoolid, maxLength));
+    if (schoolid.length() > maxLength)
+    {
+        display.setTextSize(1);
+        display.setCursor(36, 34);
+        display.print(limitString(schoolid, 14));
+    }
+    else
+    {
+        display.setTextSize(2);
+        display.setCursor(36, 34);
+        display.print(limitString(schoolid, maxLength));
+    }
 
     display.display();
 }
